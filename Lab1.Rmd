@@ -9,3 +9,120 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r, message = FALSE}
+library(tidyverse)
+library(survival)
+library(lmtest)
+```
+
+survival: Contains the core survival analysis routines, including definition of Surv objects, Kaplan-Meier and Aalen-Johansen (multi-state) curves, Cox models, and parametric accelerated failure time models.
+
+lmtest: A collection of tests, data sets, and examples for diagnostic checking in linear regression models. Furthermore, some generic tools for inference in parametric models are provided.
+
+
+# 1. Overdispersion
+```{r}
+## Read Crabs dataset into R 
+Crabs <- read.table("http://www.stat.ufl.edu/~aa/glm/data/Crabs.dat",header = T)
+## Attach the Crabs data
+attach(Crabs)
+## Take a look at Crabs
+head(Crabs)
+dim(Crabs)
+```
+
+A data frame with 173 observations on the following 5 variables.
+
+* color
+    + A factor with levels 1 = light medium, 2 = medium, 3 = dark medium, 4 = dark.
+* spine
+    + A factor with levels 1 = both good, 2 = one worn or broken, 3 = both worn or broken.
+* width
+    + Crab carapace width in cm.
+* satell
+    + Number of satellites.
+* weight
+    + Crab weight in in kg.
+
+```{r}
+
+## Fit Poisson Log linear Regression model without considering overdispersion
+fit.pois <- glm(y ~ weight, family=poisson) # ML Poisson loglinear
+summary(fit.pois)
+
+## Pearson Residual
+Pr <- sum(residuals(fit.pois, type="pearson")^2) / fit.pois$df.residual
+Pr  # estimate for overdispersion parameter
+## Compute Residual Deviance
+Rr <- fit.pois$deviance / fit.pois$df.residual
+Rr
+
+## Fit Poisson Log-Linear Regression with quasi likelihood
+fit.quasi <- glm(y ~ weight, family=quasi(link="log",variance="mu"))
+summary(fit.quasi)
+```
+
+# 2. Model Diagnostics
+```{r}
+## Leverage
+hatvalues(fit.quasi) %>% range()
+plot(1:nrow(Crabs),hatvalues(fit.quasi),pch=19)
+
+## Outlier Using Residuals
+plot(fit.quasi, 3)  # standardized deviance residuals
+
+## Cook's Distance
+cooks.distance(fit.quasi) %>% range
+plot(fit.quasi, 4)  # Cook's distance
+plot(fit.quasi, 5)  # std. Pearson residual vs leverage
+
+```
+
+# 3. Conditional Logistic regression
+```{r}
+## The Logan dataset
+head(logan, 20)
+dim(logan)
+```
+
+* Intergenerational occupational mobility data with covariates
+* occupation
+    + subject's occupation, a factor with levels farm, operatives, craftsmen, sales, and professional
+* focc
+    + father's occupation
+* education
+    + total years of schooling, 0 to 20
+* race
+    + levels of non-black and black
+
+```{r}
+resp <- levels(logan$occupation)
+n <- nrow(logan)
+indx <- rep(1:n, length(resp))
+logan2 <- data.frame(logan[indx,],
+                     id = indx,
+                     tocc = factor(rep(resp, each=n)))
+logan2$case <- (logan2$occupation == logan2$tocc)
+logan2 <- logan2[order(logan2$id),]
+
+## Show dataset for first three strata
+logan2[logan2$id %in% c(1,2,3), ]
+
+## Analysis clogit
+res.clogit <- clogit(case ~ tocc + strata(id), logan2)
+summ.clogit <- summary(res.clogit)
+summ.clogit
+
+## drop in deviance test
+set.seed(20180327)
+logan2 <- cbind(logan2, new = rnorm(4190))
+logan2 %>% head  # random noise added
+
+res.clogit.1 <- clogit(case ~ tocc + new + strata(id), logan2)
+summ.clogit.1 <- summary(res.clogit.1)
+summ.clogit.1
+
+lrtest(res.clogit, res.clogit.1)
+```
+
+
